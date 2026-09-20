@@ -3,7 +3,7 @@ import re,shutil,uuid
 from pathlib import Path
 from fastapi import FastAPI,Depends,HTTPException,UploadFile,File,Form,Request,Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer,OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer
 from jose import jwt,JWTError
 from passlib.context import CryptContext
 from pydantic import BaseModel,EmailStr,Field
@@ -19,6 +19,7 @@ app=FastAPI(title='NOTICE LENS API',version='1.0.0')
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_cors_origins,allow_credentials=True,allow_methods=['*'],allow_headers=['*'])
 pwd=CryptContext(schemes=['pbkdf2_sha256'],deprecated='auto'); oauth=OAuth2PasswordBearer(tokenUrl='/api/auth/login', auto_error=False)
 class Register(BaseModel): email:EmailStr; password:str=Field(min_length=8)
+class Login(BaseModel): email:EmailStr; password:str=Field(min_length=8)
 class ProfileIn(BaseModel): name:str='';college:str='';branch:str='';semester:str='';section:str='';language:str='en'
 class TextIn(BaseModel): text:str=Field(min_length=2); source_name:str='Pasted text'
 class QA(BaseModel): question:str=Field(min_length=2,max_length=500)
@@ -51,8 +52,8 @@ def register(data:Register,response:Response,db:Session=Depends(get_db)):
  if db.query(User).filter_by(email=email).first(): raise HTTPException(409,'An account already exists for this email. Please sign in instead.')
  u=User(email=email,password_hash=pwd.hash(data.password));u.profile=Profile();db.add(u);db.commit();db.refresh(u);return session_response(response,u)
 @app.post('/api/auth/login')
-def login(response:Response,data:OAuth2PasswordRequestForm=Depends(),db:Session=Depends(get_db)):
- u=db.query(User).filter_by(email=data.username.strip().lower()).first()
+def login(data:Login,response:Response,db:Session=Depends(get_db)):
+ u=db.query(User).filter_by(email=data.email.strip().lower()).first()
  if not u or not pwd.verify(data.password,u.password_hash): raise HTTPException(401,'Incorrect email or password. Check your details and try again.')
  return session_response(response,u)
 @app.post('/api/auth/logout')
