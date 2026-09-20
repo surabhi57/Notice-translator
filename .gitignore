@@ -1,12 +1,21 @@
 .env
+# Python environments, bytecode, test state, and local databases
 .venv/
+**/.venv/
 __pycache__/
-*.pyc
-uploads/
-frontend/node_modules/
-frontend/dist/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
 backend/noticelens.db
 
+# Local upload/runtime data
+uploads/
+backend/uploads/
+
+# JavaScript dependencies and generated bundles
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
 .npm-cache/
-backend/.venv/
-backend/backend/
+npm-debug.log*

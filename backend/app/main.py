@@ -1,7 +1,7 @@
 from datetime import datetime,timedelta,timezone
 import re,shutil,uuid
 from pathlib import Path
-from fastapi import FastAPI,Depends,HTTPException,UploadFile,File,Form
+from fastapi import FastAPI,Depends,HTTPException,UploadFile,File,Form,Request,Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer,OAuth2PasswordRequestForm
 from jose import jwt,JWTError
@@ -13,20 +13,28 @@ from PIL import Image
 from .core import settings
 from .database import Base,engine,get_db
 from .models import User,Profile,Notice,Extraction,Task
+from .ocr import extract_image_text, OCRUnavailableError
 Base.metadata.create_all(engine)
 app=FastAPI(title='NOTICE LENS API',version='1.0.0')
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origins.split(','),allow_credentials=True,allow_methods=['*'],allow_headers=['*'])
-pwd=CryptContext(schemes=['pbkdf2_sha256'],deprecated='auto'); oauth=OAuth2PasswordBearer(tokenUrl='/api/auth/login')
+pwd=CryptContext(schemes=['pbkdf2_sha256'],deprecated='auto'); oauth=OAuth2PasswordBearer(tokenUrl='/api/auth/login', auto_error=False)
 class Register(BaseModel): email:EmailStr; password:str=Field(min_length=8)
 class ProfileIn(BaseModel): name:str='';college:str='';branch:str='';semester:str='';section:str='';language:str='en'
 class TextIn(BaseModel): text:str=Field(min_length=2); source_name:str='Pasted text'
 class QA(BaseModel): question:str=Field(min_length=2,max_length=500)
 def token(u): return jwt.encode({'sub':str(u.id),'role':u.role,'exp':datetime.now(timezone.utc)+timedelta(hours=12)},settings.secret_key,algorithm='HS256')
-def me(t:str=Depends(oauth),db:Session=Depends(get_db)):
- try: u=db.get(User,int(jwt.decode(t,settings.secret_key,algorithms=['HS256'])['sub']))
+def me(request: Request, t: str | None = Depends(oauth), db: Session = Depends(get_db)):
+ credential = request.cookies.get('noticelens_session') or t
+ if not credential:
+  raise HTTPException(401, 'Your session has expired. Please sign in again.')
+ try: u=db.get(User,int(jwt.decode(credential,settings.secret_key,algorithms=['HS256'])['sub']))
  except (JWTError,ValueError,KeyError): u=None
- if not u: raise HTTPException(401,'Invalid authentication token')
+ if not u: raise HTTPException(401,'Your session is invalid. Please sign in again.')
  return u
+def session_response(response: Response, user: User):
+ value=token(user)
+ response.set_cookie(key='noticelens_session',value=value,httponly=True,samesite='lax',secure=settings.session_cookie_secure,max_age=60*60*12,path='/')
+ return {'access_token':value,'token_type':'bearer'}
 def facts(text):
  lines=[x.strip() for x in text.splitlines() if x.strip()]; rx=lambda p:re.findall(p,text,re.I)
  actions=[x for x in lines if re.search(r'apply|submit|register|pay|attend|bring',x,re.I)]
@@ -38,14 +46,17 @@ def visible(db,u,nid):
  return n
 def out(n): return {'id':n.id,'title':n.title,'source_name':n.source_name,'raw_text':n.raw_text,'status':n.status,'is_archived':n.is_archived,'is_favorite':n.is_favorite,'created_at':n.created_at,'extraction':n.extraction.data if n.extraction else None}
 @app.post('/api/auth/register')
-def register(data:Register,db:Session=Depends(get_db)):
- if db.query(User).filter_by(email=data.email.lower()).first(): raise HTTPException(409,'Email already registered')
- u=User(email=data.email.lower(),password_hash=pwd.hash(data.password));u.profile=Profile();db.add(u);db.commit();db.refresh(u);return {'access_token':token(u),'token_type':'bearer'}
+def register(data:Register,response:Response,db:Session=Depends(get_db)):
+ if db.query(User).filter_by(email=data.email.lower()).first(): raise HTTPException(409,'An account already exists for this email. Please sign in instead.')
+ u=User(email=data.email.lower(),password_hash=pwd.hash(data.password));u.profile=Profile();db.add(u);db.commit();db.refresh(u);return session_response(response,u)
 @app.post('/api/auth/login')
-def login(data:OAuth2PasswordRequestForm=Depends(),db:Session=Depends(get_db)):
+def login(response:Response,data:OAuth2PasswordRequestForm=Depends(),db:Session=Depends(get_db)):
  u=db.query(User).filter_by(email=data.username.lower()).first()
- if not u or not pwd.verify(data.password,u.password_hash): raise HTTPException(401,'Incorrect email or password')
- return {'access_token':token(u),'token_type':'bearer'}
+ if not u or not pwd.verify(data.password,u.password_hash): raise HTTPException(401,'Incorrect email or password. Check your details and try again.')
+ return session_response(response,u)
+@app.post('/api/auth/logout')
+def logout(response:Response):
+ response.delete_cookie('noticelens_session',path='/');return {'ok':True}
 @app.get('/api/me')
 def get_me(u=Depends(me)): return {'email':u.email,'role':u.role,**{k:getattr(u.profile,k) for k in ['name','college','branch','semester','section','language']}}
 @app.put('/api/me')
@@ -66,9 +77,10 @@ def upload(file:UploadFile=File(...),u=Depends(me),db:Session=Depends(get_db)):
  with path.open('wb') as dest: shutil.copyfileobj(file.file,dest)
  try:
   if ext=='.pdf': text='\n'.join(p.extract_text() or '' for p in PdfReader(str(path)).pages)
-  else:
-   import pytesseract;text=pytesseract.image_to_string(Image.open(path))
- except Exception as e: raise HTTPException(422,'Could not extract text. For images install Tesseract or paste text.') from e
+  else: text=extract_image_text(path)
+ except OCRUnavailableError as e: raise HTTPException(503,str(e)) from e
+ except ValueError as e: raise HTTPException(422,str(e)) from e
+ except Exception as e: raise HTTPException(422,'Could not extract text from this document. Please try another file or paste the notice text.') from e
  if not text.strip(): raise HTTPException(422,'No readable text found in document')
  return create_notice(text,file.filename,str(path),u,db)
 @app.get('/api/notices')
@@ -76,6 +88,11 @@ def notices(q:str='',u=Depends(me),db:Session=Depends(get_db)):
  rows=db.query(Notice).filter(Notice.owner_id==u.id,Notice.is_archived==False).order_by(Notice.created_at.desc()).all();return [out(n) for n in rows if q.lower() in (n.title+n.raw_text).lower()]
 @app.get('/api/notices/{nid}')
 def detail(nid:int,u=Depends(me),db:Session=Depends(get_db)): return out(visible(db,u,nid))
+@app.delete('/api/notices/{nid}', status_code=204)
+def delete_notice(nid:int,u=Depends(me),db:Session=Depends(get_db)):
+ n=visible(db,u,nid)
+ db.delete(n)
+ db.commit()
 @app.patch('/api/notices/{nid}/favorite')
 def favorite(nid:int,u=Depends(me),db:Session=Depends(get_db)):
  n=visible(db,u,nid);n.is_favorite=not n.is_favorite;db.commit();return out(n)
@@ -94,4 +111,8 @@ def task(tid:int,completed:bool,u=Depends(me),db:Session=Depends(get_db)):
  t.completed=completed;db.commit();return {'id':t.id,'completed':t.completed}
 @app.get('/health')
 def health(): return {'status':'ok'}
+
+
+
+
 
