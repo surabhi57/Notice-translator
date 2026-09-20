@@ -16,7 +16,7 @@ from .models import User,Profile,Notice,Extraction,Task
 from .ocr import extract_image_text, OCRUnavailableError
 Base.metadata.create_all(engine)
 app=FastAPI(title='NOTICE LENS API',version='1.0.0')
-app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origins.split(','),allow_credentials=True,allow_methods=['*'],allow_headers=['*'])
+app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_cors_origins,allow_credentials=True,allow_methods=['*'],allow_headers=['*'])
 pwd=CryptContext(schemes=['pbkdf2_sha256'],deprecated='auto'); oauth=OAuth2PasswordBearer(tokenUrl='/api/auth/login', auto_error=False)
 class Register(BaseModel): email:EmailStr; password:str=Field(min_length=8)
 class ProfileIn(BaseModel): name:str='';college:str='';branch:str='';semester:str='';section:str='';language:str='en'
