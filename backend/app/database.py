@@ -9,6 +9,8 @@ def sqlalchemy_url(url: str) -> str:
  return url
 
 database_url=sqlalchemy_url(settings.database_url)
+if settings.is_render and database_url.startswith('sqlite'):
+ raise RuntimeError('DATABASE_URL must point to persistent Postgres on Render; SQLite cannot retain production accounts.')
 engine=create_engine(database_url,connect_args={'check_same_thread':False} if database_url.startswith('sqlite') else {},pool_pre_ping=not database_url.startswith('sqlite'))
 SessionLocal=sessionmaker(bind=engine,autoflush=False)
 class Base(DeclarativeBase): pass

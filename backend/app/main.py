@@ -33,7 +33,7 @@ def me(request: Request, t: str | None = Depends(oauth), db: Session = Depends(g
  return u
 def session_response(response: Response, user: User):
  value=token(user)
- response.set_cookie(key='noticelens_session',value=value,httponly=True,samesite='lax',secure=settings.session_cookie_secure,max_age=60*60*12,path='/')
+ response.set_cookie(key='noticelens_session',value=value,httponly=True,samesite=settings.session_cookie_samesite,secure=settings.session_cookie_secure,max_age=60*60*12,path='/')
  return {'access_token':value,'token_type':'bearer'}
 def facts(text):
  lines=[x.strip() for x in text.splitlines() if x.strip()]; rx=lambda p:re.findall(p,text,re.I)
@@ -47,11 +47,12 @@ def visible(db,u,nid):
 def out(n): return {'id':n.id,'title':n.title,'source_name':n.source_name,'raw_text':n.raw_text,'status':n.status,'is_archived':n.is_archived,'is_favorite':n.is_favorite,'created_at':n.created_at,'extraction':n.extraction.data if n.extraction else None}
 @app.post('/api/auth/register')
 def register(data:Register,response:Response,db:Session=Depends(get_db)):
- if db.query(User).filter_by(email=data.email.lower()).first(): raise HTTPException(409,'An account already exists for this email. Please sign in instead.')
- u=User(email=data.email.lower(),password_hash=pwd.hash(data.password));u.profile=Profile();db.add(u);db.commit();db.refresh(u);return session_response(response,u)
+ email=data.email.strip().lower()
+ if db.query(User).filter_by(email=email).first(): raise HTTPException(409,'An account already exists for this email. Please sign in instead.')
+ u=User(email=email,password_hash=pwd.hash(data.password));u.profile=Profile();db.add(u);db.commit();db.refresh(u);return session_response(response,u)
 @app.post('/api/auth/login')
 def login(response:Response,data:OAuth2PasswordRequestForm=Depends(),db:Session=Depends(get_db)):
- u=db.query(User).filter_by(email=data.username.lower()).first()
+ u=db.query(User).filter_by(email=data.username.strip().lower()).first()
  if not u or not pwd.verify(data.password,u.password_hash): raise HTTPException(401,'Incorrect email or password. Check your details and try again.')
  return session_response(response,u)
 @app.post('/api/auth/logout')

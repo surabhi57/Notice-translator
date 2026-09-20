@@ -10,6 +10,8 @@ services:
         value: /usr/bin/tesseract
       - key: SESSION_COOKIE_SECURE
         value: "true"
+      - key: SESSION_COOKIE_SAMESITE
+        value: none
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL

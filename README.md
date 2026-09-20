@@ -37,6 +37,8 @@ Deploy the supplied `render.yaml` as a Render Blueprint. It uses the Docker runt
 
 The Blueprint provisions `notiq-postgres` and wires its private connection string to `DATABASE_URL`. Production must use this persistent Postgres database; container-local SQLite is only for local development and is not suitable for retaining registered accounts across Render deploys.
 
+For the deployed Vercel frontend, Render sets the session cookie to `SameSite=None; Secure`, allowing the authenticated cookie to travel with credentialed cross-site API requests. Local development remains `SameSite=Lax` over HTTP.
+
 ## Design decisions and limitations
 
 AI output is validated against Pydantic schemas. If no provider is configured, deterministic extraction still identifies URLs/emails/phones and reports unavailable AI enrichment instead of fabricating facts. OCR uses PyMuPDF/PyPDF text extraction and Tesseract when installed. Q&A uses lexical retrieval locally; set up pgvector embeddings in PostgreSQL for semantic retrieval in production. Background notifications need a scheduler/worker (Celery, RQ, or platform cron) to deliver reminders.
