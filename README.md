@@ -31,6 +31,9 @@ docker run --env-file ./backend/.env -p 8000:8000 noticelens-api
 The backend Docker image installs Tesseract and English, Hindi, and Kannada OCR language data. OCR is therefore a deployment dependency, never a student/user dependency. Set `SESSION_COOKIE_SECURE=true` behind HTTPS. `TESSERACT_CMD` is optional in the Docker image because `tesseract` is already on `PATH`; it remains available for non-container development environments.
 
 The repository excludes local environments, package caches, uploaded runtime files, SQLite databases, and generated frontend bundles. The backend build context also has its own `.dockerignore`, keeping deployment images dependent only on source code and declared Python packages.
+### Render
+
+Deploy the supplied `render.yaml` as a Render Blueprint. It uses the Docker runtime with `backend/Dockerfile`; Render automatically builds the image, installs the Linux Tesseract packages, and runs the image `CMD`. That command starts FastAPI on Render's assigned `PORT`. The Blueprint sets `TESSERACT_CMD=/usr/bin/tesseract`; configure the synced `DATABASE_URL` and `CORS_ORIGINS` values in Render before deployment. Local Windows setups continue to use the optional `TESSERACT_CMD` from `backend/.env`.
 
 ## Design decisions and limitations
 
@@ -41,3 +44,4 @@ See [docs/API.md](docs/API.md) for endpoint details.
 ### Image OCR
 
 The deployment image installs Tesseract for the backend. JPG, JPEG, and PNG uploads are processed through `pytesseract`; successful OCR text follows the same `create_notice` extraction/task pipeline as PDF and pasted-text notices. The application never hardcodes a machine-specific path. `TESSERACT_CMD` is only needed when running the backend outside the supplied Docker image. When OCR is unavailable or the image contains no readable text, the API returns a specific error and preserves no fabricated extraction.
+
