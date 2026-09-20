@@ -19,7 +19,7 @@ Open `http://localhost:5173`. The API docs are at `http://localhost:8000/docs`.
 
 ## Deployment
 
-Set `DATABASE_URL=postgresql+psycopg://...`, `SECRET_KEY`, `CORS_ORIGINS`, and either `OPENAI_API_KEY` (with `AI_PROVIDER=openai`) or `GEMINI_API_KEY` (with `AI_PROVIDER=gemini`). Use object storage for `UPLOAD_DIR` in production. Run behind HTTPS and a reverse proxy; apply a rate limiter such as Redis at the edge.
+Set `DATABASE_URL=postgresql+psycopg://...`, `SECRET_KEY`, `CORS_ORIGINS`, and either `OPENAI_API_KEY` (with `AI_PROVIDER=openai`) or `GEMINI_API_KEY` (with `AI_PROVIDER=gemini`). `CORS_ORIGINS` defaults to `http://localhost:5173,https://notiq-wine.vercel.app`; preserve both values when setting it in Render. Use object storage for `UPLOAD_DIR` in production. Run behind HTTPS and a reverse proxy; apply a rate limiter such as Redis at the edge.
 
 Build and run the backend with its supplied production image:
 
