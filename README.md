@@ -33,7 +33,9 @@ The backend Docker image installs Tesseract and English, Hindi, and Kannada OCR 
 The repository excludes local environments, package caches, uploaded runtime files, SQLite databases, and generated frontend bundles. The backend build context also has its own `.dockerignore`, keeping deployment images dependent only on source code and declared Python packages.
 ### Render
 
-Deploy the supplied `render.yaml` as a Render Blueprint. It uses the Docker runtime with `backend/Dockerfile`; Render automatically builds the image, installs the Linux Tesseract packages, and runs the image `CMD`. That command starts FastAPI on Render's assigned `PORT`. The Blueprint sets `TESSERACT_CMD=/usr/bin/tesseract`; configure the synced `DATABASE_URL` and `CORS_ORIGINS` values in Render before deployment. Local Windows setups continue to use the optional `TESSERACT_CMD` from `backend/.env`.
+Deploy the supplied `render.yaml` as a Render Blueprint. It uses the Docker runtime with `backend/Dockerfile`; Render automatically builds the image, installs the Linux Tesseract packages, and runs the image `CMD`. That command starts FastAPI on Render's assigned `PORT`. The Blueprint sets `TESSERACT_CMD=/usr/bin/tesseract`; configure the synced `CORS_ORIGINS` value in Render before deployment. Local Windows setups continue to use the optional `TESSERACT_CMD` from `backend/.env`.
+
+The Blueprint provisions `notiq-postgres` and wires its private connection string to `DATABASE_URL`. Production must use this persistent Postgres database; container-local SQLite is only for local development and is not suitable for retaining registered accounts across Render deploys.
 
 ## Design decisions and limitations
 
