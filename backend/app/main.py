@@ -3,10 +3,10 @@ import re,shutil,uuid
 from pathlib import Path
 from fastapi import FastAPI,Depends,HTTPException,UploadFile,File,Form,Request,Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 from jose import jwt,JWTError
 from passlib.context import CryptContext
-from pydantic import BaseModel,EmailStr,Field
+from pydantic import BaseModel,EmailStr,Field,ValidationError
 from sqlalchemy.orm import Session
 from pypdf import PdfReader
 from PIL import Image
@@ -17,15 +17,15 @@ from .ocr import extract_image_text, OCRUnavailableError
 Base.metadata.create_all(engine)
 app=FastAPI(title='NOTICE LENS API',version='1.0.0')
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_cors_origins,allow_credentials=True,allow_methods=['*'],allow_headers=['*'])
-pwd=CryptContext(schemes=['pbkdf2_sha256'],deprecated='auto'); oauth=OAuth2PasswordBearer(tokenUrl='/api/auth/login', auto_error=False)
+pwd=CryptContext(schemes=['pbkdf2_sha256'],deprecated='auto'); bearer=HTTPBearer(auto_error=False)
 class Register(BaseModel): email:EmailStr; password:str=Field(min_length=8)
 class Login(BaseModel): email:EmailStr; password:str=Field(min_length=8)
 class ProfileIn(BaseModel): name:str='';college:str='';branch:str='';semester:str='';section:str='';language:str='en'
 class TextIn(BaseModel): text:str=Field(min_length=2); source_name:str='Pasted text'
 class QA(BaseModel): question:str=Field(min_length=2,max_length=500)
 def token(u): return jwt.encode({'sub':str(u.id),'role':u.role,'exp':datetime.now(timezone.utc)+timedelta(hours=12)},settings.secret_key,algorithm='HS256')
-def me(request: Request, t: str | None = Depends(oauth), db: Session = Depends(get_db)):
- credential = request.cookies.get('noticelens_session') or t
+def me(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)):
+ credential = request.cookies.get('noticelens_session') or (credentials.credentials if credentials else None)
  if not credential:
   raise HTTPException(401, 'Your session has expired. Please sign in again.')
  try: u=db.get(User,int(jwt.decode(credential,settings.secret_key,algorithms=['HS256'])['sub']))
@@ -51,8 +51,20 @@ def register(data:Register,response:Response,db:Session=Depends(get_db)):
  email=data.email.strip().lower()
  if db.query(User).filter_by(email=email).first(): raise HTTPException(409,'An account already exists for this email. Please sign in instead.')
  u=User(email=email,password_hash=pwd.hash(data.password));u.profile=Profile();db.add(u);db.commit();db.refresh(u);return session_response(response,u)
-@app.post('/api/auth/login')
-def login(data:Login,response:Response,db:Session=Depends(get_db)):
+async def login_payload(request: Request) -> Login:
+ """Accept the documented JSON credentials plus the legacy deployed form payload."""
+ content_type=request.headers.get('content-type','').lower()
+ try:
+  if 'application/json' in content_type: payload=await request.json()
+  elif 'application/x-www-form-urlencoded' in content_type:
+   form=await request.form();payload={'email':form.get('email') or form.get('username'),'password':form.get('password')}
+  else: payload={}
+  return Login.model_validate(payload)
+ except (ValueError,ValidationError) as error:
+  raise HTTPException(422,detail='Enter a valid email address and a password of at least 8 characters.') from error
+@app.post('/api/auth/login',openapi_extra={'requestBody':{'required':True,'content':{'application/json':{'schema':Login.model_json_schema()}}}})
+async def login(request:Request,response:Response,db:Session=Depends(get_db)):
+ data=await login_payload(request)
  u=db.query(User).filter_by(email=data.email.strip().lower()).first()
  if not u or not pwd.verify(data.password,u.password_hash): raise HTTPException(401,'Incorrect email or password. Check your details and try again.')
  return session_response(response,u)
