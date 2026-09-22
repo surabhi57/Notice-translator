@@ -1,4 +1,5 @@
 from datetime import datetime,timedelta,timezone
+import logging
 import re,secrets,shutil,uuid
 from pathlib import Path
 from fastapi import FastAPI,Depends,HTTPException,UploadFile,File,Form,Request,Response
@@ -11,11 +12,14 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from sqlalchemy.orm import Session
 from pypdf import PdfReader
+from pypdf.errors import PdfReadError
+from docx import Document
 from PIL import Image
 from .core import settings
 from .database import Base,engine,get_db
 from .models import User,Profile,Notice,Extraction,Task
 from .ocr import extract_image_text, OCRUnavailableError
+logger=logging.getLogger(__name__)
 Base.metadata.create_all(engine)
 app=FastAPI(title='NOTICE LENS API',version='1.0.0')
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_cors_origins,allow_credentials=True,allow_methods=['*'],allow_headers=['*'])
@@ -97,19 +101,42 @@ def create_notice(text,name,path,u,db):
  db.commit();db.refresh(n);return out(n)
 @app.post('/api/notices/text')
 def add_text(data:TextIn,u=Depends(me),db:Session=Depends(get_db)): return create_notice(data.text,data.source_name,None,u,db)
+class UploadExtractionError(ValueError): pass
+def discard_failed_upload(path:Path) -> None:
+ try: path.unlink(missing_ok=True)
+ except OSError: logger.exception('Could not remove failed upload %s',path.name)
+def extract_pdf_text(path:Path) -> str:
+ try: reader=PdfReader(str(path))
+ except PdfReadError as error: raise UploadExtractionError('This PDF is damaged or is not a valid PDF file.') from error
+ if reader.is_encrypted: raise UploadExtractionError('This PDF is password-protected or encrypted. Remove the password and upload it again.')
+ try: text='\n'.join(page.extract_text() or '' for page in reader.pages)
+ except Exception as error: raise UploadExtractionError('Text could not be read from this PDF. If it is password-protected, remove the password and upload it again.') from error
+ if not text.strip(): raise UploadExtractionError('This valid PDF contains no extractable text. It appears to be scanned or image-only; upload clear page images or paste the notice text.')
+ return text
+def extract_docx_text(path:Path) -> str:
+ try: text='\n'.join(paragraph.text for paragraph in Document(str(path)).paragraphs)
+ except Exception as error: raise UploadExtractionError('This DOCX file could not be read. Check that it is a valid, uncorrupted .docx document.') from error
+ if not text.strip(): raise UploadExtractionError('This DOCX file contains no readable paragraph text.')
+ return text
 @app.post('/api/notices/upload')
 def upload(file:UploadFile=File(...),u=Depends(me),db:Session=Depends(get_db)):
  ext=Path(file.filename or '').suffix.lower()
- if ext not in {'.pdf','.png','.jpg','.jpeg'}: raise HTTPException(415,'Only PDF, PNG, JPG and JPEG are allowed')
+ if ext not in {'.pdf','.docx','.png','.jpg','.jpeg'}: raise HTTPException(415,'Only PDF, DOCX, PNG, JPG and JPEG files are allowed.')
  path=Path(settings.upload_dir)/f'{uuid.uuid4()}{ext}'
- with path.open('wb') as dest: shutil.copyfileobj(file.file,dest)
  try:
-  if ext=='.pdf': text='\n'.join(p.extract_text() or '' for p in PdfReader(str(path)).pages)
+  with path.open('wb') as dest: shutil.copyfileobj(file.file,dest)
+  if ext=='.pdf': text=extract_pdf_text(path)
+  elif ext=='.docx': text=extract_docx_text(path)
   else: text=extract_image_text(path)
- except OCRUnavailableError as e: raise HTTPException(503,str(e)) from e
- except ValueError as e: raise HTTPException(422,str(e)) from e
- except Exception as e: raise HTTPException(422,'Could not extract text from this document. Please try another file or paste the notice text.') from e
- if not text.strip(): raise HTTPException(422,'No readable text found in document')
+ except OCRUnavailableError as error:
+  logger.exception('OCR is unavailable while processing upload %s',file.filename);discard_failed_upload(path)
+  raise HTTPException(503,str(error)) from error
+ except (UploadExtractionError,ValueError) as error:
+  logger.exception('Document extraction failed for upload %s',file.filename);discard_failed_upload(path)
+  raise HTTPException(422,str(error)) from error
+ except Exception as error:
+  logger.exception('Unexpected upload failure for %s',file.filename);discard_failed_upload(path)
+  raise HTTPException(500,'We could not process this document. Please try another file or paste the notice text.') from error
  return create_notice(text,file.filename,str(path),u,db)
 @app.get('/api/notices')
 def notices(q:str='',u=Depends(me),db:Session=Depends(get_db)):

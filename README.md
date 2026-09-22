@@ -61,3 +61,11 @@ Google Sign-In uses Google Identity Services in the browser and verifies every r
 5. Set `GOOGLE_CLIENT_ID` to that exact value for the backend locally and in Render. In Vercel, set `VITE_GOOGLE_CLIENT_ID` to the same value, then redeploy both services.
 
 The backend checks the token audience, issuer, signature and verified email before locating or creating an account. Existing accounts retain their password login; accounts first created with Google receive a cryptographically random, unknown password hash.
+### Document upload handling
+
+- Supported: PDF, DOCX, PNG, JPG and JPEG.
+- Password-protected or encrypted PDFs receive a specific message.
+- Damaged/non-PDF files renamed as `.pdf` receive a specific message.
+- Valid PDFs without extractable text receive a specific scanned/image-only PDF message; upload clear page images for OCR or paste the text.
+- Empty DOCX files receive a specific no-readable-paragraphs message; malformed/corrupt DOCX files receive a specific document-read message.
+- Image OCR errors and unavailable OCR receive their existing specific messages. Unexpected file-copy, parser and storage failures are logged with ERROR-level tracebacks and return a safe generic processing message.
