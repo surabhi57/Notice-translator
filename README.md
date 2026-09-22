@@ -49,3 +49,15 @@ See [docs/API.md](docs/API.md) for endpoint details.
 
 The deployment image installs Tesseract for the backend. JPG, JPEG, and PNG uploads are processed through `pytesseract`; successful OCR text follows the same `create_notice` extraction/task pipeline as PDF and pasted-text notices. The application never hardcodes a machine-specific path. `TESSERACT_CMD` is only needed when running the backend outside the supplied Docker image. When OCR is unavailable or the image contains no readable text, the API returns a specific error and preserves no fabricated extraction.
 
+
+### Google Sign-In
+
+Google Sign-In uses Google Identity Services in the browser and verifies every returned ID token on the FastAPI server. It creates no frontend secret and continues to issue the existing `noticelens_session` HttpOnly cookie.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project and configure the OAuth consent screen.
+2. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**, choose **Web application**, and create the client.
+3. Add authorized JavaScript origins: `http://localhost:5173` and `https://notiq-wine.vercel.app`. Add any custom production domain as another origin.
+4. Copy the Web client ID (ends in `.apps.googleusercontent.com`). No client secret belongs in this application.
+5. Set `GOOGLE_CLIENT_ID` to that exact value for the backend locally and in Render. In Vercel, set `VITE_GOOGLE_CLIENT_ID` to the same value, then redeploy both services.
+
+The backend checks the token audience, issuer, signature and verified email before locating or creating an account. Existing accounts retain their password login; accounts first created with Google receive a cryptographically random, unknown password hash.

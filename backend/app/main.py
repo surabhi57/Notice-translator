@@ -1,5 +1,5 @@
 from datetime import datetime,timedelta,timezone
-import re,shutil,uuid
+import re,secrets,shutil,uuid
 from pathlib import Path
 from fastapi import FastAPI,Depends,HTTPException,UploadFile,File,Form,Request,Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +7,8 @@ from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 from jose import jwt,JWTError
 from passlib.context import CryptContext
 from pydantic import BaseModel,EmailStr,Field,ValidationError
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from sqlalchemy.orm import Session
 from pypdf import PdfReader
 from PIL import Image
@@ -20,6 +22,7 @@ app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_cors_origins,al
 pwd=CryptContext(schemes=['pbkdf2_sha256'],deprecated='auto'); bearer=HTTPBearer(auto_error=False)
 class Register(BaseModel): email:EmailStr; password:str=Field(min_length=8)
 class Login(BaseModel): email:EmailStr; password:str=Field(min_length=8)
+class GoogleLogin(BaseModel): credential:str=Field(min_length=1,max_length=8192)
 class ProfileIn(BaseModel): name:str='';college:str='';branch:str='';semester:str='';section:str='';language:str='en'
 class TextIn(BaseModel): text:str=Field(min_length=2); source_name:str='Pasted text'
 class QA(BaseModel): question:str=Field(min_length=2,max_length=500)
@@ -67,6 +70,17 @@ async def login(request:Request,response:Response,db:Session=Depends(get_db)):
  data=await login_payload(request)
  u=db.query(User).filter_by(email=data.email.strip().lower()).first()
  if not u or not pwd.verify(data.password,u.password_hash): raise HTTPException(401,'Incorrect email or password. Check your details and try again.')
+ return session_response(response,u)
+@app.post('/api/auth/google')
+def google_login(data:GoogleLogin,response:Response,db:Session=Depends(get_db)):
+ if not settings.google_client_id: raise HTTPException(503,'Google Sign-In is not configured.')
+ try: claims=id_token.verify_oauth2_token(data.credential,google_requests.Request(),settings.google_client_id)
+ except ValueError as error: raise HTTPException(401,'Google could not verify this sign-in. Please try again.') from error
+ email=claims.get('email')
+ if not isinstance(email,str) or not claims.get('email_verified'): raise HTTPException(401,'Your Google account must have a verified email address.')
+ email=email.strip().lower();u=db.query(User).filter_by(email=email).first()
+ if not u:
+  u=User(email=email,password_hash=pwd.hash(secrets.token_urlsafe(48)));u.profile=Profile();db.add(u);db.commit();db.refresh(u)
  return session_response(response,u)
 @app.post('/api/auth/logout')
 def logout(response:Response):
