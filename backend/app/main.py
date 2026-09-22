@@ -13,12 +13,14 @@ from google.oauth2 import id_token
 from sqlalchemy.orm import Session
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
+from pdf2image import convert_from_path
+from pdf2image.exceptions import PDFInfoNotInstalledError,PDFPageCountError,PDFSyntaxError
 from docx import Document
 from PIL import Image
 from .core import settings
 from .database import Base,engine,get_db
 from .models import User,Profile,Notice,Extraction,Task
-from .ocr import extract_image_text, OCRUnavailableError
+from .ocr import extract_image_text,extract_pil_image_text, OCRUnavailableError
 logger=logging.getLogger(__name__)
 Base.metadata.create_all(engine)
 app=FastAPI(title='NOTICE LENS API',version='1.0.0')
@@ -109,10 +111,16 @@ def extract_pdf_text(path:Path) -> str:
  try: reader=PdfReader(str(path))
  except PdfReadError as error: raise UploadExtractionError('This PDF is damaged or is not a valid PDF file.') from error
  if reader.is_encrypted: raise UploadExtractionError('This PDF is password-protected or encrypted. Remove the password and upload it again.')
- try: text='\n'.join(page.extract_text() or '' for page in reader.pages)
+ try: text='\n'.join(page.extract_text() or '' for page in reader.pages).strip()
  except Exception as error: raise UploadExtractionError('Text could not be read from this PDF. If it is password-protected, remove the password and upload it again.') from error
- if not text.strip(): raise UploadExtractionError('This valid PDF contains no extractable text. It appears to be scanned or image-only; upload clear page images or paste the notice text.')
- return text
+ if len(text) >= 20: return text
+ try: ocr_text='\n'.join(extract_pil_image_text(page,allow_empty=True) for page in convert_from_path(str(path))).strip()
+ except OCRUnavailableError: raise
+ except (PDFInfoNotInstalledError,PDFPageCountError,PDFSyntaxError) as error: raise UploadExtractionError('This PDF could not be rendered for OCR. Please upload clear page images or paste the notice text.') from error
+ except Exception as error: raise UploadExtractionError('This PDF could not be rendered for OCR. Please upload clear page images or paste the notice text.') from error
+ if ocr_text: return ocr_text
+ if text: return text
+ raise UploadExtractionError('No readable text was found in this PDF after OCR. Upload a clearer scan or paste the notice text.')
 def extract_docx_text(path:Path) -> str:
  try: text='\n'.join(paragraph.text for paragraph in Document(str(path)).paragraphs)
  except Exception as error: raise UploadExtractionError('This DOCX file could not be read. Check that it is a valid, uncorrupted .docx document.') from error

@@ -15,6 +15,7 @@ RUN apt-get update \
        tesseract-ocr-eng \
        tesseract-ocr-hin \
        tesseract-ocr-kan \
+       poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
