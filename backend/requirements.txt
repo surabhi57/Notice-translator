@@ -13,5 +13,6 @@ pytesseract==0.3.13
 psycopg[binary]==3.2.3
 email-validator==2.2.0
 google-auth==2.37.0
+requests==2.32.3
 pytest==8.3.4
 httpx==0.28.1
